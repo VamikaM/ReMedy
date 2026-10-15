@@ -46,8 +46,9 @@ Hybrid R-GCN training:
 # 2. Run the reproducible label screen. It creates a cached source snapshot.
 !python src/preprocessing/fetch_openfda_context_screen.py
 
-# 3. Create disease_target_effects.csv from the Open Targets direction-of-effect
-#    extract. This is a required source table, not a manually guessed column.
+# 3. Collect signed disease-target evidence and a mapping audit from Open Targets.
+#    Unresolved IDs are withheld rather than guessed.
+!python src/preprocessing/fetch_open_targets_direction_evidence.py
 
 # 4. Gate the internal model scores. This is the only command that creates the
 #    researcher-facing candidate shortlist.
