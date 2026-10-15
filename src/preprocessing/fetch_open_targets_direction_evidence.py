@@ -93,7 +93,11 @@ def batches(values: list[str], size: int = 250):
 
 
 def select_disease_mapping(node_id: str, label: str, hits: list[dict]) -> dict | None:
-    candidates = [hit for hit in hits if clean(hit.get("entity")).upper() == "DISEASE"]
+    candidates_by_id = {
+        clean(hit.get("id")): hit for hit in hits
+        if clean(hit.get("entity")).upper() == "DISEASE" and clean(hit.get("id"))
+    }
+    candidates = list(candidates_by_id.values())
     # An existing EFO ID is already canonical. Otherwise only take an exact
     # label result; fuzzy hits are preserved in the audit but are not accepted.
     if node_id.upper().startswith("EFO_"):
