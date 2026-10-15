@@ -80,7 +80,17 @@ def main() -> None:
     args = parse_args()
     nodes = pd.read_parquet(args.nodes)
     drugs = sorted(nodes.loc[nodes["node_type"].eq("drug"), "node_id"].astype(str))
-    proteins = set(nodes.loc[nodes["node_type"].eq("protein"), "node_id"].astype(str))
+    graph_proteins = nodes.loc[nodes["node_type"].eq("protein"), "node_id"].astype(str)
+
+    # Accept the graph's canonical protein ID exactly as stored, while matching
+    # ChEMBL target-component accessions independently of prefix/case.
+    def accession(node_id: str) -> str:
+        return str(node_id).split(":")[-1].upper()
+
+    protein_by_accession = {
+        accession(node_id): node_id for node_id in graph_proteins
+        if accession(node_id)
+    }
 
     mechanisms = load_or_fetch(
         args.cache_dir / "mechanisms.jsonl", "mechanism", "mechanisms", drugs,
@@ -106,8 +116,8 @@ def main() -> None:
         if drug_id not in drugs:
             continue
         for accession in target_to_accessions.get(str(mechanism.get("target_chembl_id")), set()):
-            protein_id = f"UniProt:{accession}"
-            if protein_id not in proteins:
+            protein_id = protein_by_accession.get(str(accession).upper())
+            if not protein_id:
                 continue
             rows.append({
                 "drug_id": drug_id,
@@ -129,6 +139,7 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     output.to_csv(args.output, index=False)
     print(f"Wrote {len(output):,} source-backed action records to {args.output}")
+    print(f"Graph proteins considered: {len(graph_proteins):,}; matched ChEMBL accessions: {output['protein_id'].nunique():,}")
     print("Action type counts:")
     print(output["action_type"].value_counts().head(20).to_string())
 
