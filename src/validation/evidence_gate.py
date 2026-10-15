@@ -152,6 +152,8 @@ def main() -> None:
     effects["disease_sign"] = effects["disease_effect"].map(disease_sign)
     mechanism_by_drug = {drug: frame for drug, frame in mechanisms.groupby("drug_id")}
     effect_by_disease = {disease: frame for disease, frame in effects.groupby("disease_id")}
+    empty_mechanisms = mechanisms.iloc[0:0].copy()
+    empty_effects = effects.iloc[0:0].copy()
     safety_by_pair = {(row.drug_id, row.disease_id): row
                       for row in safety.itertuples(index=False)}
 
@@ -159,8 +161,8 @@ def main() -> None:
     for pair in ranking.itertuples(index=False):
         drug_id, disease_id = text(pair.drug_id), text(pair.disease_id)
         known_status = known_by_pair.get((drug_id, disease_id), "")
-        drug_mechanisms = mechanism_by_drug.get(drug_id, pd.DataFrame())
-        disease_effects = effect_by_disease.get(disease_id, pd.DataFrame())
+        drug_mechanisms = mechanism_by_drug.get(drug_id, empty_mechanisms)
+        disease_effects = effect_by_disease.get(disease_id, empty_effects)
         linked = pd.merge(drug_mechanisms, disease_effects, on="protein_id", how="inner",
                           suffixes=("_drug", "_disease"))
         if not linked.empty:
