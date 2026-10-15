@@ -1,0 +1,7 @@
+# Lean dependency set for Google Colab model runs
+pandas>=2.0
+numpy>=1.24
+pyarrow>=12.0
+scikit-learn>=1.3
+joblib>=1.3
+torch-geometric>=2.5
