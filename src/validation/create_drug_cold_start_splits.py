@@ -137,8 +137,12 @@ def main():
     remove_mask = []
     for row in edges.itertuples(index=False):
         pair = (row.source_id, row.target_id)
+        # For a held-out drug, remove every treatment label, including
+        # labels on pairs excluded from supervision because they conflict
+        # with a contraindication.  Otherwise a hidden label could remain.
         remove = (
-            row.relation in TREATMENT_RELATIONS and pair in heldout_pairs
+            row.relation in TREATMENT_RELATIONS
+            and (row.source_id in heldout_drugs or pair in conflicts)
         )
         if row.relation == CONTRAINDICATION and pair in conflicts:
             remove = True
