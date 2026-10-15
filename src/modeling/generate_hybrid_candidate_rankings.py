@@ -207,11 +207,12 @@ def main():
     ).reset_index(drop=True)
     ranking.insert(0, "rank", np.arange(1, len(ranking) + 1))
 
-    ranking.to_csv(OUTPUT_DIR / "hybrid_rgcn_unobserved_candidate_ranking.csv",
-                   index=False)
-    ranking.head(100).to_csv(
-        OUTPUT_DIR / "hybrid_rgcn_top_100_candidates.csv", index=False
-    )
+    # Raw scores are an internal model artifact.  They are intentionally not
+    # emitted as a researcher-facing top-candidate list: run
+    # src/validation/evidence_gate.py after enriching mechanism, disease-effect,
+    # and safety-context inputs.
+    raw_output = OUTPUT_DIR / "hybrid_rgcn_raw_internal_scores.csv"
+    ranking.to_csv(raw_output, index=False)
 
     metadata = {
         "candidate_count": len(ranking),
@@ -220,16 +221,16 @@ def main():
         "best_validation_auprc": checkpoint["best_validation_auprc"],
         "training_graph": str((MODEL_DIR / "training_graph_edges.parquet")
                               .relative_to(ROOT)),
-        "score_interpretation": "Model ranking score for unobserved pairs",
+        "score_interpretation": "Internal graph-model signal; not an eligibility or clinical-use score",
+        "publication_status": "internal_audit_only",
+        "next_step": "Run evidence_gate.py; only EVIDENCE_SUPPORTED pairs may be surfaced to researchers.",
     }
     (OUTPUT_DIR / "hybrid_rgcn_candidate_ranking_metadata.json").write_text(
         json.dumps(metadata, indent=2), encoding="utf-8"
     )
-    print("Candidate pairs scored:", len(ranking))
-    print(ranking.head(20)[
-        ["rank", "drug_name", "disease_name", "hybrid_rgcn_score",
-         "shared_protein_count", "shared_pathway_count"]
-    ].to_string(index=False))
+    print("Candidate pairs scored internally:", len(ranking))
+    print("Raw scores saved for audit only:", raw_output)
+    print("Next: run src/validation/evidence_gate.py before displaying candidates.")
 
 
 if __name__ == "__main__":
