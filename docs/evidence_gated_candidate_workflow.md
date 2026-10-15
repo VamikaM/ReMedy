@@ -36,8 +36,14 @@ The workflow deliberately separates a **model signal** from an
 
 ## Colab commands
 
-Run these after pulling the `codex/hybrid-rgcn-training` branch and completing
-Hybrid R-GCN training:
+After pulling the `codex/hybrid-rgcn-training` branch and completing Hybrid
+R-GCN training, the full workflow can be run with:
+
+```python
+!python src/run_evidence_gated_pipeline.py
+```
+
+The following commands are the equivalent transparent step-by-step version:
 
 ```python
 # 1. Produce source-backed inhibitor/agonist/etc. records for graph drugs.
