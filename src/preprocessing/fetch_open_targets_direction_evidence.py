@@ -204,32 +204,34 @@ def main() -> None:
     for remedy_disease_id, efo_id in disease_to_efo.items():
         if not efo_id:
             continue
-        cursor = None
-        while True:
-            data = gql(EVIDENCE_QUERY, {
-                "efoId": efo_id, "ensemblIds": ensembl_ids, "cursor": cursor,
-            })
-            payload = (data.get("disease") or {}).get("evidences") or {"rows": [], "cursor": None}
-            for evidence in payload["rows"]:
-                effect = direction_to_effect(evidence.get("directionOnTarget"), evidence.get("directionOnTrait"))
-                target_id = clean((evidence.get("target") or {}).get("id"))
-                if not effect or target_id not in ensembl_to_protein:
-                    continue
-                evidence_rows.append({
-                    "disease_id": remedy_disease_id,
-                    "protein_id": ensembl_to_protein[target_id],
-                    "disease_effect": effect,
-                    "source": f"OpenTargets:{clean(evidence.get('datasourceId'))}",
-                    "evidence_id": f"OpenTargets:{clean(evidence.get('id'))}",
-                    "direction_on_target": clean(evidence.get("directionOnTarget")),
-                    "direction_on_trait": clean(evidence.get("directionOnTrait")),
-                    "evidence_score": evidence.get("score"),
-                    "open_targets_disease_id": efo_id,
-                    "open_targets_target_id": target_id,
+        # Batch target IDs to keep GraphQL requests bounded on the public API.
+        for target_group in batches(ensembl_ids):
+            cursor = None
+            while True:
+                data = gql(EVIDENCE_QUERY, {
+                    "efoId": efo_id, "ensemblIds": target_group, "cursor": cursor,
                 })
-            cursor = payload.get("cursor")
-            if not cursor:
-                break
+                payload = (data.get("disease") or {}).get("evidences") or {"rows": [], "cursor": None}
+                for evidence in payload["rows"]:
+                    effect = direction_to_effect(evidence.get("directionOnTarget"), evidence.get("directionOnTrait"))
+                    target_id = clean((evidence.get("target") or {}).get("id"))
+                    if not effect or target_id not in ensembl_to_protein:
+                        continue
+                    evidence_rows.append({
+                        "disease_id": remedy_disease_id,
+                        "protein_id": ensembl_to_protein[target_id],
+                        "disease_effect": effect,
+                        "source": f"OpenTargets:{clean(evidence.get('datasourceId'))}",
+                        "evidence_id": f"OpenTargets:{clean(evidence.get('id'))}",
+                        "direction_on_target": clean(evidence.get("directionOnTarget")),
+                        "direction_on_trait": clean(evidence.get("directionOnTrait")),
+                        "evidence_score": evidence.get("score"),
+                        "open_targets_disease_id": efo_id,
+                        "open_targets_target_id": target_id,
+                    })
+                cursor = payload.get("cursor")
+                if not cursor:
+                    break
 
     columns = [
         "disease_id", "protein_id", "disease_effect", "source", "evidence_id",
