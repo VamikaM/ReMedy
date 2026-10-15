@@ -119,7 +119,11 @@ def main() -> None:
                 "evidence_id": f"CHEMBL-MECH:{mechanism.get('record_id')}",
             })
 
-    output = pd.DataFrame(rows).drop_duplicates(
+    columns = [
+        "drug_id", "protein_id", "action_type", "mechanism_of_action",
+        "direct_interaction", "source", "evidence_id",
+    ]
+    output = pd.DataFrame(rows, columns=columns).drop_duplicates(
         ["drug_id", "protein_id", "action_type", "evidence_id"]
     ).sort_values(["drug_id", "protein_id", "action_type"])
     args.output.parent.mkdir(parents=True, exist_ok=True)
