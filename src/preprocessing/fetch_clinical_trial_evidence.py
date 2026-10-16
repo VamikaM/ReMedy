@@ -28,7 +28,8 @@ API_URL = "https://clinicaltrials.gov/api/v2/studies"
 
 
 def clean(value: object) -> str:
-    return re.sub(r"[^a-z0-9 ]+", " ", str(value).lower()).strip()
+    value = re.sub(r"\\b([A-Za-z0-9]+)\\'s\\b", r"\\1", str(value))
+    return re.sub(r"[^a-z0-9 ]+", " ", value.lower()).strip()
 
 
 def read_pairs(path: Path) -> pd.DataFrame:
