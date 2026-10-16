@@ -40,7 +40,7 @@ def disease_terms(label: str, aliases: list[str]) -> list[str]:
     return sorted(term for term in terms if len(term) >= 4)
 
 
-def fetch_label(drug_name: str, cache_path: Path) -> dict:
+def fetch_label(drug_name: str, cache_path: Path, timeout_seconds: float) -> dict:
     if cache_path.exists():
         return json.loads(cache_path.read_text(encoding="utf-8"))
     # Drug names are identifiers for retrieval only. The response remains the
@@ -48,7 +48,7 @@ def fetch_label(drug_name: str, cache_path: Path) -> dict:
     query = quote(f'openfda.generic_name:"{drug_name}"')
     url = f"{BASE_URL}?search={query}&limit=100"
     try:
-        with urlopen(url, timeout=60) as response:
+        with urlopen(url, timeout=timeout_seconds) as response:
             payload = json.load(response)
     except Exception as error:
         payload = {"_retrieval_error": str(error), "results": []}
@@ -77,6 +77,8 @@ def parse_args() -> argparse.Namespace:
                         default=root / "data" / "processed" / "drug_safety_context.csv")
     parser.add_argument("--cache-dir", type=Path,
                         default=root / "data" / "raw" / "openfda_labels")
+    parser.add_argument("--timeout-seconds", type=float, default=20.0,
+                        help="Maximum wait per openFDA request; failed requests are recorded for audit.")
     return parser.parse_args()
 
 
@@ -91,6 +93,8 @@ def main() -> None:
         aliases = alias_frame.groupby("disease_id")["alias"].agg(list).to_dict()
 
     cache: dict[str, dict] = {}
+    unique_drug_count = ranking["drug_id"].nunique()
+    processed_drug_count = 0
     output = []
     warning_fields = ["contraindications", "boxed_warning", "warnings", "warnings_and_cautions"]
     for row in ranking[["drug_id", "disease_id"]].itertuples(index=False):
@@ -104,8 +108,13 @@ def main() -> None:
             })
             continue
         if row.drug_id not in cache:
+            processed_drug_count += 1
+            if processed_drug_count == 1 or processed_drug_count % 25 == 0 or processed_drug_count == unique_drug_count:
+                print(f"Processing drug label {processed_drug_count}/{unique_drug_count}: {drug_name}", flush=True)
             safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", drug_name)
-            cache[row.drug_id] = fetch_label(drug_name, args.cache_dir / f"{safe_name}.json")
+            cache[row.drug_id] = fetch_label(
+                drug_name, args.cache_dir / f"{safe_name}.json", args.timeout_seconds
+            )
         results = cache[row.drug_id].get("results", [])
         if not results:
             output.append({
