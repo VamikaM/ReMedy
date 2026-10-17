@@ -53,12 +53,12 @@ def summarise_trials(frame):
     frame = frame.copy()
     frame["clinical_evidence_state"] = frame["clinical_evidence_state"].map(upper)
     frame["nct_id"] = frame["nct_id"].map(clean)
-    group = frame.groupby(["drug_id", "disease_id"], as_index=False)
+    group = frame.groupby(["drug_id", "disease_id"])
     result = group.agg(
         clinical_states=("clinical_evidence_state", joined),
         trial_ids=("nct_id", joined),
         trial_statuses=("overall_status", joined),
-    )
+    ).reset_index()
     result["registered_trial_count"] = group["nct_id"].apply(
         lambda values: len({value for value in values if value})
     ).to_numpy()
@@ -74,11 +74,11 @@ def summarise_papers(frame):
         return pd.DataFrame(columns=columns)
     frame = frame.copy()
     frame["pmid"] = frame["pmid"].map(clean)
-    group = frame.groupby(["drug_id", "disease_id"], as_index=False)
+    group = frame.groupby(["drug_id", "disease_id"])
     result = group.agg(
         pubmed_ids=("pmid", joined),
         publication_types=("publication_types", joined),
-    )
+    ).reset_index()
     result["pubmed_record_count"] = group["pmid"].apply(
         lambda values: len({value for value in values if value})
     ).to_numpy()
