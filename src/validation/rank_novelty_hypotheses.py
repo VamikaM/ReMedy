@@ -72,7 +72,13 @@ def main():
         "target_id"
     )["source_id"].nunique().to_dict()
 
-    score_lookup = raw.set_index(["drug_id", "disease_id"])["hybrid_rgcn_score"]
+    raw_by_pair = raw.set_index(["drug_id", "disease_id"])
+    score_lookup = raw_by_pair["hybrid_rgcn_score"]
+    pathway_lookup = (
+        raw_by_pair["shared_pathway_count"]
+        if "shared_pathway_count" in raw_by_pair.columns
+        else pd.Series(dtype=float)
+    )
     result = maturity.loc[maturity["eligibility_status"].eq(PASS)].copy()
     result["hybrid_rgcn_score"] = [
         score_lookup.get((row.drug_id, row.disease_id), np.nan)
@@ -103,8 +109,12 @@ def main():
 
     result["protein_specificity_raw"] = result["compatible_proteins"].map(specificity)
     result["protein_specificity_score"] = minmax(result["protein_specificity_raw"])
-    result["shared_pathway_count"] = result.get(
-        "shared_pathway_count", pd.Series(0, index=result.index)
+    result["shared_pathway_count"] = [
+        pathway_lookup.get((row.drug_id, row.disease_id), 0.0)
+        for row in result.itertuples(index=False)
+    ]
+    result["shared_pathway_count"] = pd.Series(
+        result["shared_pathway_count"], index=result.index
     ).fillna(0).astype(float)
     result["pathway_convergence_score"] = minmax(
         np.log1p(result["shared_pathway_count"])
