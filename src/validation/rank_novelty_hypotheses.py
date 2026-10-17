@@ -58,6 +58,7 @@ def main():
     required = {
         "drug_id", "disease_id", "eligibility_status", "compatible_proteins",
         "research_maturity_stage", "research_status",
+        "external_evidence_retrieved",
     }
     missing = required - set(maturity.columns)
     if missing:
@@ -65,9 +66,11 @@ def main():
     if {"drug_id", "disease_id", "hybrid_rgcn_score"} - set(raw.columns):
         raise ValueError("Raw ranking must contain drug_id, disease_id, hybrid_rgcn_score")
 
-    target_degree = graph.loc[graph["relation"].eq("targets")].groupby(
-        "target_id"
-    )["source_id"].nunique().to_dict()
+    target_edges = graph.loc[graph["relation"].eq("targets")]
+    target_degree = target_edges.groupby("target_id")[
+        "source_id"
+    ].nunique().to_dict()
+    drug_targets = target_edges.groupby("source_id")["target_id"].agg(set).to_dict()
     disease_degree = graph.loc[graph["relation"].eq("associated_with")].groupby(
         "target_id"
     )["source_id"].nunique().to_dict()
@@ -108,6 +111,30 @@ def main():
         return float(np.mean(scores)) if scores else 0.0
 
     result["protein_specificity_raw"] = result["compatible_proteins"].map(specificity)
+
+    def class_size(group):
+        profiles = {
+            row.drug_id: drug_targets.get(row.drug_id, set())
+            for row in group.itertuples(index=False)
+        }
+        values = {}
+        for drug_id, targets in profiles.items():
+            similar = 0
+            for other_id, other_targets in profiles.items():
+                union = targets | other_targets
+                similarity = len(targets & other_targets) / len(union) if union else 0.0
+                if similarity >= 0.80:
+                    similar += 1
+            values[drug_id] = similar
+        return group["drug_id"].map(values)
+
+    result["mechanistic_class_size"] = (
+        result.groupby("disease_id", group_keys=False).apply(class_size)
+        .reindex(result.index)
+        .fillna(1)
+        .astype(int)
+    )
+    result["class_uniqueness_score"] = 1 / result["mechanistic_class_size"]
     result["protein_specificity_score"] = minmax(result["protein_specificity_raw"])
     result["shared_pathway_count"] = [
         pathway_lookup.get((row.drug_id, row.disease_id), 0.0)
@@ -130,20 +157,29 @@ def main():
         maturity_multiplier
     ).fillna(0.0)
     result["base_novelty_score"] = (
-        0.45 * result["within_disease_model_percentile"]
-        + 0.35 * result["protein_specificity_score"]
-        + 0.20 * result["pathway_convergence_score"]
+        0.35 * result["within_disease_model_percentile"]
+        + 0.25 * result["protein_specificity_score"]
+        + 0.15 * result["pathway_convergence_score"]
+        + 0.25 * result["class_uniqueness_score"]
     )
     result["novelty_priority_score"] = (
         result["base_novelty_score"] * result["maturity_multiplier"]
     )
     result.loc[result["research_status"].isin(EXCLUDED), "novelty_priority_score"] = 0.0
-    result["candidate_class"] = np.where(
-        result["research_maturity_stage"].isin(
-            ["M1_MECHANISTIC_HYPOTHESIS", "M2_LITERATURE_CONTEXT_RETRIEVED"]
-        ),
-        "NOVEL_HYPOTHESIS_REQUIRING_VALIDATION",
-        "NOT_A_NOVEL_HYPOTHESIS_SHORTLIST_ITEM",
+    result["candidate_class"] = np.select(
+        [
+            result["research_status"].isin(EXCLUDED),
+            result["research_maturity_stage"].eq("M1_AWAITING_EVIDENCE_RETRIEVAL"),
+            result["research_maturity_stage"].isin(
+                ["M1_MECHANISTIC_HYPOTHESIS", "M2_LITERATURE_CONTEXT_RETRIEVED"]
+            ) & result["external_evidence_retrieved"],
+        ],
+        [
+            "EXCLUDED_BY_SOURCE_EVIDENCE",
+            "EVIDENCE_RETRIEVAL_PENDING",
+            "NOVEL_HYPOTHESIS_REQUIRING_VALIDATION",
+        ],
+        default="NOT_A_NOVEL_HYPOTHESIS_SHORTLIST_ITEM",
     )
     result = result.sort_values(
         ["disease_id", "novelty_priority_score", "drug_id"],
@@ -162,10 +198,11 @@ def main():
         "input_mechanistically_compatible_pairs": int(len(result)),
         "novel_hypotheses_requiring_validation": int(len(shortlist)),
         "score": {
-            "model_signal": 0.45,
-            "protein_specificity": 0.35,
-            "pathway_convergence": 0.20,
-            "maturity_adjustment": "penalises unresolved/established human research",
+            "model_signal": 0.35,
+            "protein_specificity": 0.25,
+            "pathway_convergence": 0.15,
+            "mechanistic_class_uniqueness": 0.25,
+            "maturity_adjustment": "withholds unsearched and unresolved human-research pairs",
         },
         "safeguard": "Output is a research-priority list, not a clinical recommendation.",
     }
