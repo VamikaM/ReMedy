@@ -111,6 +111,10 @@ def stage(row):
         return 1, "M1_MECHANISTIC_HYPOTHESIS", "NOVEL_MECHANISTIC_HYPOTHESIS", (
             "Plan disease-relevant preclinical or translational validation."
         )
+    if not bool(row.external_evidence_retrieved):
+        return 1, "M1_AWAITING_EVIDENCE_RETRIEVAL", "EVIDENCE_RETRIEVAL_PENDING", (
+            "Retrieve ClinicalTrials.gov and PubMed evidence before assigning a hypothesis stage."
+        )
     if bool(row.needs_outcome_review):
         return 3, "M3_HUMAN_RESEARCH_IDENTIFIED", "OUTCOME_REVIEW_REQUIRED", (
             "Review trial endpoint, population, comparator, completion reason, and outcome."
@@ -135,6 +139,9 @@ def parse_args():
                         default=root / "data/processed/clinical_trial_evidence.csv")
     parser.add_argument("--pubmed", type=Path,
                         default=root / "data/processed/pubmed_evidence.csv")
+    parser.add_argument("--retrieval-batch", type=Path,
+                        default=root / "data/processed/clinical_review_candidates.csv",
+                        help="Pairs actually sent to external evidence retrieval.")
     parser.add_argument("--adjudications", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path,
                         default=root / "reports/research_maturity")
@@ -151,6 +158,9 @@ def main():
     }, optional=True)
     papers = read(args.pubmed, {
         "drug_id", "disease_id", "pmid", "publication_types",
+    }, optional=True)
+    retrieval_batch = read(args.retrieval_batch, {
+        "drug_id", "disease_id",
     }, optional=True)
     adjudications = read(args.adjudications, {
         "drug_id", "disease_id", "clinical_outcome_verdict",
@@ -169,6 +179,15 @@ def main():
             "drug_id", "disease_id", "clinical_outcome_verdict"
         ]]
 
+    retrieved_pairs = set(
+        retrieval_batch[["drug_id", "disease_id"]].itertuples(index=False, name=None)
+    )
+    retrieved_pairs.update(
+        trials[["drug_id", "disease_id"]].itertuples(index=False, name=None)
+    )
+    retrieved_pairs.update(
+        papers[["drug_id", "disease_id"]].itertuples(index=False, name=None)
+    )
     tracker = candidates.merge(
         summarise_trials(trials), on=["drug_id", "disease_id"], how="left"
     ).merge(
@@ -176,6 +195,10 @@ def main():
     ).merge(
         adjudications, on=["drug_id", "disease_id"], how="left"
     )
+    tracker["external_evidence_retrieved"] = [
+        (row.drug_id, row.disease_id) in retrieved_pairs
+        for row in tracker.itertuples(index=False)
+    ]
     for column in ("registered_trial_count", "pubmed_record_count"):
         tracker[column] = tracker[column].fillna(0).astype(int)
     for column in ("needs_outcome_review", "trial_active", "literature_retrieved"):
@@ -198,6 +221,7 @@ def main():
         "mechanistically_compatible_pairs": int(
             tracker["eligibility_status"].eq(PASS).sum()
         ),
+        "externally_retrieved_pairs": int(tracker["external_evidence_retrieved"].sum()),
         "research_status_counts": tracker["research_status"].value_counts().to_dict(),
         "maturity_stage_counts": tracker["research_maturity_stage"].value_counts().to_dict(),
         "policy": {
