@@ -193,6 +193,20 @@ def main() -> None:
             if column in frame.columns:
                 frame[column] = frame[column].map(clean)
 
+    # Older known-use screen files did not include source_url.  Preserve their
+    # evidence status and create a stable ChEMBL record link rather than failing
+    # the disposition build.
+    if "source_url" not in known.columns:
+        known["source_url"] = known.get(
+            "drug_id", pd.Series("", index=known.index)
+        ).map(
+            lambda drug_id: (
+                "https://www.ebi.ac.uk/chembl/g/#browse/activities/filter/"
+                f"molecule_chembl_id:{clean(drug_id)}"
+                if clean(drug_id) else ""
+            )
+        )
+
     chain_cols = ["candidate_id", "evidence_chain_stage", "target_gate_status", "exposure_gate_status"]
     known_cols = ["candidate_id", "known_use_screen_status", "source_url"]
     outcome_cols = [
