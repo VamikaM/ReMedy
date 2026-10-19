@@ -68,8 +68,8 @@ def label_text(result: dict, fields: list[str]) -> str:
 def parse_args() -> argparse.Namespace:
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--ranking", type=Path,
-                        default=root / "reports" / "model_evaluation" / "hybrid_rgcn_raw_internal_scores.csv")
+    parser.add_argument("--ranking", type=Path, default=None,
+                        help="Ranked-pair CSV. Defaults to Evidence-Aware V2 when available, otherwise V1.")
     parser.add_argument("--nodes", type=Path, default=root / "data" / "processed" / "nodes.parquet")
     parser.add_argument("--aliases", type=Path, default=None,
                         help="Optional CSV: disease_id,alias")
@@ -84,6 +84,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.ranking is None:
+        output_dir = Path(__file__).resolve().parents[2] / "reports" / "model_evaluation"
+        v2_ranking = output_dir / "evidence_aware_rgcn_raw_internal_scores.csv"
+        v1_ranking = output_dir / "hybrid_rgcn_raw_internal_scores.csv"
+        args.ranking = v2_ranking if v2_ranking.exists() else v1_ranking
+    if not args.ranking.exists():
+        raise FileNotFoundError(f"Ranking file not found: {args.ranking}")
     ranking = pd.read_csv(args.ranking, dtype={"drug_id": str, "disease_id": str})
     nodes = pd.read_parquet(args.nodes)
     node_labels = nodes.set_index("node_id")["label"].astype(str).to_dict()
