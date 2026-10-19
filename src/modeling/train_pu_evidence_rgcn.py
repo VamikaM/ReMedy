@@ -29,7 +29,8 @@ DATA_DIR = ROOT / "data" / "processed"
 MODEL_DIR = ROOT / "data" / "model"
 SPLIT_DIR = ROOT / "data" / "splits"
 OUTPUT_DIR = ROOT / "reports" / "model_evaluation"
-CHECKPOINT_DIR = ROOT / "models"\nPU_LABEL_PATH = MODEL_DIR / "v3_pu_train_labels.csv"
+CHECKPOINT_DIR = ROOT / "models"
+PU_LABEL_PATH = MODEL_DIR / "v3_pu_train_labels.csv"
 
 FEATURE_COLUMNS = [
     "shared_protein_count",
@@ -75,7 +76,9 @@ def parse_args():
     parser.add_argument("--learning-rate", type=float, default=0.002)
     parser.add_argument("--weight-decay", type=float, default=0.002)
     parser.add_argument("--max-epochs", type=int, default=150)
-    parser.add_argument("--patience", type=int, default=20)\n    parser.add_argument("--pu-ranking-weight", type=float, default=0.50,\n                        help="Weight for ranking positives above unlabelled pairs.")
+    parser.add_argument("--patience", type=int, default=20)
+    parser.add_argument("--pu-ranking-weight", type=float, default=0.50,
+                        help="Weight for ranking positives above unlabelled pairs.")
     return parser.parse_args()
 
 
@@ -533,7 +536,10 @@ def main():
         "treatment_labels_used_in_message_passing": False,
         "explicit_features": FEATURE_COLUMNS,
         "seeds": [int(x) for x in args.seeds.split(",") if x.strip()],
-        "model_selection": "highest validation AUPRC",\n        "training_method": "positive-unlabelled ranking with reliable-negative supervision",\n        "pu_label_source": str(PU_LABEL_PATH.relative_to(ROOT)),\n        "pu_label_state_counts": pu_labels["label_state"].value_counts().to_dict(),
+        "model_selection": "highest validation AUPRC",
+        "training_method": "positive-unlabelled ranking with reliable-negative supervision",
+        "pu_label_source": str(PU_LABEL_PATH.relative_to(ROOT)),
+        "pu_label_state_counts": pu_labels["label_state"].value_counts().to_dict(),
     }
     (OUTPUT_DIR / "pu_evidence_rgcn_metadata.json").write_text(
         json.dumps(metadata, indent=2), encoding="utf-8"
