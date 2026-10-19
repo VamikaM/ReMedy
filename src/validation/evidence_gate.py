@@ -202,7 +202,7 @@ def main() -> None:
             status, reason = "EVIDENCE_INCOMPLETE", "Missing: " + ", ".join(data_missing)
         elif len(compatible):
             if safety_status in PASSING_SAFETY_STATUSES:
-                status, reason = "EVIDENCE_SUPPORTED", "Direction-compatible mechanism and source-backed safety context"
+                status, reason = "EVIDENCE_SUPPORTED", "Direction-compatible genetic-mechanism signal and source-backed safety context"
             else:
                 status, reason = "SAFETY_CONTEXT_UNRESOLVED", f"Safety context status: {safety_status}"
         elif len(conflicting):
@@ -247,7 +247,7 @@ def main() -> None:
         "status_counts": audit["eligibility_status"].value_counts().to_dict(),
         "policy": {
             "known_use": "withheld from novel-candidate shortlist",
-            "mechanism": "requires direction-compatible drug-protein-disease chain",
+            "mechanism": "requires a direction-compatible drug action plus genetic-risk direction; this is not efficacy evidence",
             "safety": "requires source-backed NO_MATCHING_CONTEXT_FLAG status",
         },
     }
