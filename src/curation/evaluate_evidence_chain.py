@@ -75,8 +75,13 @@ def main() -> None:
 
     targets["target_review_verdict"] = targets["target_review_verdict"].map(normalized)
     targets["citation_present"] = targets["source_citation"].map(has_citation)
+    targets["target_role"] = targets["target_role"].map(normalized)
+    targets["desired_modulation"] = targets["desired_modulation"].map(normalized)
     valid_targets = targets.loc[
-        targets["target_review_verdict"].eq("SUPPORTED") & targets["citation_present"]
+        targets["target_review_verdict"].eq("SUPPORTED")
+        & targets["citation_present"]
+        & targets["target_role"].isin({"CAUSAL_DRIVER", "PROTECTIVE_FACTOR"})
+        & ~targets["desired_modulation"].isin({"", "UNREVIEWED", "UNCERTAIN"})
     ]
     target_support = (
         valid_targets.groupby("disease_id")["protein_id"]
@@ -114,9 +119,18 @@ def main() -> None:
         target = "SUPPORTED" if supported_proteins & candidate_proteins else "PENDING"
         exposure = "SUPPORTED" if row.candidate_id in exposure_support else "PENDING"
         outcome = outcome_by_id.get(row.candidate_id, {})
+        citation_present = bool(outcome.get("citation_present", False))
         phenotype = outcome.get("preclinical_phenotype_verdict", "PENDING")
         human = outcome.get("human_outcome_verdict", "PENDING")
         safety = outcome.get("disease_relevant_safety_verdict", "PENDING")
+        # Outcome claims without a source are treated as unresolved, never promoted.
+        if not citation_present:
+            if phenotype != "PENDING":
+                phenotype = "PENDING"
+            if human != "PENDING":
+                human = "PENDING"
+            if safety != "PENDING":
+                safety = "PENDING"
         stage, action = stage_for(target, exposure, phenotype, human, safety)
         stages.append(stage)
         actions.append(action)
