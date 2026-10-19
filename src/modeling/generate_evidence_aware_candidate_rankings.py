@@ -202,15 +202,34 @@ def main():
         disease_set = disease_proteins[disease]
         drug_set = drug_pathways[drug]
         pathway_set = disease_pathways[disease]
+        shared_proteins = targets & disease_set
+        compatible_evidence_scores = []
+        specificity_weighted_support = 0.0
+        for protein in shared_proteins:
+            effect = effect_rows.get((disease, protein))
+            action_values = mechanism_signs.get((drug, protein), set())
+            if effect is None or not action_values:
+                continue
+            disease_sign, evidence_score = effect
+            # A compatible action counteracts the disease-associated direction.
+            if any(action * disease_sign == -1 for action in action_values):
+                compatible_evidence_scores.append(evidence_score)
+                specificity_weighted_support += evidence_score / np.sqrt(
+                    max(1, protein_drug_degree[protein])
+                    * max(1, protein_disease_degree[protein])
+                )
         features.append([
-            len(targets & disease_set), jaccard(targets, disease_set),
+            len(shared_proteins), jaccard(targets, disease_set),
             len(drug_set & pathway_set), jaccard(drug_set, pathway_set),
             len(targets), len(disease_set), len(drug_set), len(pathway_set),
+            float(sum(compatible_evidence_scores)),
+            float(specificity_weighted_support),
+            len(compatible_evidence_scores),
         ])
-    features = np.asarray(features, dtype=np.float32)
+    raw_features = np.asarray(features, dtype=np.float32)
     mean = np.asarray(checkpoint["feature_scaler_mean"], dtype=np.float32)
     scale = np.asarray(checkpoint["feature_scaler_scale"], dtype=np.float32)
-    features = (features - mean) / np.where(scale == 0, 1.0, scale)
+    features = (raw_features - mean) / np.where(scale == 0, 1.0, scale)
 
     model = HybridRGCN(
         num_nodes=len(node_to_idx),
@@ -247,9 +266,12 @@ def main():
         "drug_name": [labels[drug] for drug, _ in candidates],
         "disease_id": [disease for _, disease in candidates],
         "disease_name": [labels[disease] for _, disease in candidates],
-        "hybrid_rgcn_score": scores,
-        "shared_protein_count": features[:, 0] * scale[0] + mean[0],
-        "shared_pathway_count": features[:, 2] * scale[2] + mean[2],
+        "evidence_aware_rgcn_score": scores,
+        "shared_protein_count": raw_features[:, 0],
+        "shared_pathway_count": raw_features[:, 2],
+        "target_evidence_score": raw_features[:, 8],
+        "specificity_weighted_target_support": raw_features[:, 9],
+        "direction_compatible_target_count": raw_features[:, 10],
     }).sort_values(
         ["hybrid_rgcn_score", "drug_id", "disease_id"],
         ascending=[False, True, True]
