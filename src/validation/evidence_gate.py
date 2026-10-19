@@ -16,7 +16,7 @@ clearance decision.
 
 Expected input tables (CSV or Parquet):
 
-  ranked_pairs: drug_id, disease_id, hybrid_rgcn_score
+  ranked_pairs: drug_id, disease_id, and one supported model-score column
   nodes: node_id, node_type, label
   edges: source_id, relation, target_id
   drug_mechanisms: drug_id, protein_id, action_type, source, evidence_id
@@ -115,7 +115,16 @@ def main() -> None:
     args = parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    ranking = read_table(args.ranking, {"drug_id", "disease_id", "hybrid_rgcn_score"})
+    ranking = read_table(args.ranking, {"drug_id", "disease_id"})
+    score_column = next(
+        (column for column in ("evidence_aware_rgcn_score", "hybrid_rgcn_score")
+         if column in ranking.columns),
+        None,
+    )
+    if score_column is None:
+        raise ValueError(
+            "ranking must contain evidence_aware_rgcn_score or hybrid_rgcn_score"
+        )
     nodes = read_table(args.nodes, {"node_id", "node_type", "label"})
     edges = read_table(args.edges, {"source_id", "relation", "target_id"})
     mechanisms = read_table(args.mechanisms,
@@ -206,7 +215,7 @@ def main() -> None:
             "drug_name": labels.get(drug_id, drug_id),
             "disease_id": disease_id,
             "disease_name": labels.get(disease_id, disease_id),
-            "model_score": float(pair.hybrid_rgcn_score),
+            "model_score": float(getattr(pair, score_column)),
             "eligibility_status": status,
             "decision_reason": reason,
             "known_relation": known_status,
