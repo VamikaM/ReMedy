@@ -273,7 +273,7 @@ def main():
         "specificity_weighted_target_support": raw_features[:, 9],
         "direction_compatible_target_count": raw_features[:, 10],
     }).sort_values(
-        ["hybrid_rgcn_score", "drug_id", "disease_id"],
+        ["evidence_aware_rgcn_score", "drug_id", "disease_id"],
         ascending=[False, True, True]
     ).reset_index(drop=True)
     ranking.insert(0, "rank", np.arange(1, len(ranking) + 1))
