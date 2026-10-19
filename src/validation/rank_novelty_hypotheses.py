@@ -37,8 +37,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--maturity", type=Path,
                         default=root / "reports/research_maturity/candidate_research_maturity_tracker.csv")
-    parser.add_argument("--raw-ranking", type=Path,
-                        default=root / "reports/model_evaluation/hybrid_rgcn_raw_internal_scores.csv")
+    parser.add_argument("--raw-ranking", type=Path, default=None,
+                        help="Raw ranked pairs. Defaults to Evidence-Aware V2 when available, otherwise V1.")
     parser.add_argument("--training-graph", type=Path,
                         default=root / "data/model/training_graph_edges.parquet")
     parser.add_argument("--output-dir", type=Path,
@@ -47,6 +47,11 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.raw_ranking is None:
+        output_dir = Path(__file__).resolve().parents[2] / "reports" / "model_evaluation"
+        v2_ranking = output_dir / "evidence_aware_rgcn_raw_internal_scores.csv"
+        v1_ranking = output_dir / "hybrid_rgcn_raw_internal_scores.csv"
+        args.raw_ranking = v2_ranking if v2_ranking.exists() else v1_ranking
     maturity = pd.read_csv(args.maturity, dtype={"drug_id": str, "disease_id": str})
     raw = pd.read_csv(args.raw_ranking, dtype={"drug_id": str, "disease_id": str})
     graph = pd.read_parquet(args.training_graph)
@@ -63,8 +68,15 @@ def main():
     missing = required - set(maturity.columns)
     if missing:
         raise ValueError(f"Maturity tracker is missing columns: {sorted(missing)}")
-    if {"drug_id", "disease_id", "hybrid_rgcn_score"} - set(raw.columns):
-        raise ValueError("Raw ranking must contain drug_id, disease_id, hybrid_rgcn_score")
+    score_column = next(
+        (column for column in ("evidence_aware_rgcn_score", "hybrid_rgcn_score")
+         if column in raw.columns),
+        None,
+    )
+    if score_column is None:
+        raise ValueError(
+            "Raw ranking must contain evidence_aware_rgcn_score or hybrid_rgcn_score"
+        )
 
     target_edges = graph.loc[graph["relation"].eq("targets")]
     target_degree = target_edges.groupby("target_id")[
@@ -76,22 +88,22 @@ def main():
     )["source_id"].nunique().to_dict()
 
     raw_by_pair = raw.set_index(["drug_id", "disease_id"])
-    score_lookup = raw_by_pair["hybrid_rgcn_score"]
+    score_lookup = raw_by_pair[score_column]
     pathway_lookup = (
         raw_by_pair["shared_pathway_count"]
         if "shared_pathway_count" in raw_by_pair.columns
         else pd.Series(dtype=float)
     )
     result = maturity.loc[maturity["eligibility_status"].eq(PASS)].copy()
-    result["hybrid_rgcn_score"] = [
+    result["model_score"] = [
         score_lookup.get((row.drug_id, row.disease_id), np.nan)
         for row in result.itertuples(index=False)
     ]
-    if result["hybrid_rgcn_score"].isna().any():
+    if result["model_score"].isna().any():
         raise ValueError("Some maturity pairs were not found in raw ranking.")
 
     raw["within_disease_model_percentile"] = raw.groupby("disease_id")[
-        "hybrid_rgcn_score"
+        score_column
     ].rank(pct=True, method="average")
     percentile = raw.set_index(["drug_id", "disease_id"])[
         "within_disease_model_percentile"
