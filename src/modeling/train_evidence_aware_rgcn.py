@@ -263,8 +263,24 @@ def main():
             disease_protein_set = disease_proteins[row.disease_id]
             drug_pathway_set = drug_pathways[row.drug_id]
             disease_pathway_set = disease_pathways[row.disease_id]
+            shared_proteins = drug_proteins & disease_protein_set
+            compatible_evidence_scores = []
+            specificity_weighted_support = 0.0
+            for protein in shared_proteins:
+                effect = effect_rows.get((row.disease_id, protein))
+                action_values = mechanism_signs.get((row.drug_id, protein), set())
+                if effect is None or not action_values:
+                    continue
+                disease_sign, evidence_score = effect
+                # A compatible action counteracts the disease-associated direction.
+                if any(action * disease_sign == -1 for action in action_values):
+                    compatible_evidence_scores.append(evidence_score)
+                    specificity_weighted_support += evidence_score / np.sqrt(
+                        max(1, protein_drug_degree[protein])
+                        * max(1, protein_disease_degree[protein])
+                    )
             rows.append([
-                len(drug_proteins & disease_protein_set),
+                len(shared_proteins),
                 jaccard(drug_proteins, disease_protein_set),
                 len(drug_pathway_set & disease_pathway_set),
                 jaccard(drug_pathway_set, disease_pathway_set),
@@ -272,6 +288,9 @@ def main():
                 len(disease_protein_set),
                 len(drug_pathway_set),
                 len(disease_pathway_set),
+                float(sum(compatible_evidence_scores)),
+                float(specificity_weighted_support),
+                len(compatible_evidence_scores),
             ])
         return np.asarray(rows, dtype=np.float32)
 
