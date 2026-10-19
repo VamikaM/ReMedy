@@ -34,23 +34,24 @@ def norm_id(value: object) -> str:
     return re.sub(r"[^a-z0-9]+", "", clean(value).lower())
 
 
-def get_records(drug_id: str, cache_dir: Path) -> list[dict]:
+def get_records(drug_id: str, cache_dir: Path) -> tuple[list[dict], str]:
     key = hashlib.sha256(drug_id.encode("utf-8")).hexdigest()[:20]
     path = cache_dir / f"{key}.json"
     if path.exists():
-        return json.loads(path.read_text(encoding="utf-8")).get("records", [])
+        cached = json.loads(path.read_text(encoding="utf-8"))
+        return cached.get("records", []), clean(cached.get("error"))
     params = {"molecule_chembl_id": drug_id, "limit": 1000}
     try:
         with urlopen(f"{API}?{urlencode(params)}", timeout=45) as response:
             payload = json.load(response)
         records = payload.get("drug_indications", payload.get("results", []))
-        response_data = {"records": records}
+        response_data = {"records": records, "error": ""}
     except Exception as error:
         response_data = {"records": [], "error": str(error)}
     cache_dir.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(response_data), encoding="utf-8")
     time.sleep(0.12)
-    return response_data["records"]
+    return response_data["records"], clean(response_data["error"])
 
 
 def parse_args() -> argparse.Namespace:
@@ -95,10 +96,14 @@ def main() -> None:
 
     unique_drugs = candidates[["drug_id", "drug_name"]].drop_duplicates()
     records = []
+    retrieval_errors = {}
     for index, row in enumerate(unique_drugs.itertuples(index=False), start=1):
         if index == 1 or index % 10 == 0 or index == len(unique_drugs):
             print(f"ChEMBL indication retrieval {index}/{len(unique_drugs)}: {row.drug_name}", flush=True)
-        for indication in get_records(clean(row.drug_id), args.cache_dir):
+        indications, error = get_records(clean(row.drug_id), args.cache_dir)
+        if error:
+            retrieval_errors[clean(row.drug_id)] = error
+        for indication in indications:
             records.append({
                 "drug_id": clean(row.drug_id),
                 "drug_name": clean(row.drug_name),
@@ -132,7 +137,10 @@ def main() -> None:
         term = drug_records.loc[
             drug_records["indication_efo_term"].map(norm_term).eq(norm_term(candidate.disease_name))
         ]
-        if not exact.empty:
+        if clean(candidate.drug_id) in retrieval_errors:
+            state = "CHEMBL_RETRIEVAL_ERROR"
+            matched = drug_records
+        elif not exact.empty:
             state = "KNOWN_USE_EXACT_EFO_MATCH"
             matched = exact
         elif not term.empty:
@@ -159,6 +167,7 @@ def main() -> None:
                 matched["indication_efo_id"].dropna().astype(str).unique()
             ),
             "source": "ChEMBL:drug_indication",
+            "retrieval_error": retrieval_errors.get(clean(candidate.drug_id), ""),
         })
 
     statuses = pd.DataFrame(status_rows)
