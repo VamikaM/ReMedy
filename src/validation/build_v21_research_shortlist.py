@@ -39,9 +39,18 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def jaccard(left: set[str], right: set[str]) -> float:
-    union = left | right
-    return len(left & right) / len(union) if union else 0.0
+def mechanism_overlap(left: set[str], right: set[str]) -> float:
+    """Overlap coefficient: detects when one supported mechanism is a subset of another."""
+    smallest = min(len(left), len(right))
+    return len(left & right) / smallest if smallest else 0.0
+
+
+def compatible_protein_set(value: object) -> set[str]:
+    return {
+        item.strip()
+        for item in str(value).split("|")
+        if item and item.strip() and str(item).lower() != "nan"
+    }
 
 
 def next_action(stage: str) -> str:
@@ -74,11 +83,17 @@ def main() -> None:
     if missing:
         raise ValueError(f"Novelty ranking is missing columns: {sorted(missing)}")
 
-    targets = graph.loc[graph["relation"].eq("targets")]
-    drug_targets = targets.groupby("source_id")["target_id"].agg(set).to_dict()
-    ranking["target_profile_size"] = ranking["drug_id"].map(
-        lambda drug_id: len(drug_targets.get(drug_id, set()))
+    # Full drug target profiles are often different even when the same
+    # disease-relevant mechanism is supported. Diversity must therefore use
+    # the compatible proteins passed by the evidence gate.
+    if "compatible_proteins" not in ranking.columns:
+        raise ValueError("Novelty ranking must include compatible_proteins.")
+    ranking["compatible_protein_profile"] = ranking["compatible_proteins"].map(
+        compatible_protein_set
     )
+    ranking["compatible_protein_count"] = ranking[
+        "compatible_protein_profile"
+    ].map(len)
     ranking["v21_next_action"] = ranking["research_maturity_stage"].map(next_action)
 
     eligible = ranking.loc[
@@ -94,12 +109,15 @@ def main() -> None:
         selected: list[tuple[str, set[str]]] = []
         decisions = []
         for row in group.itertuples(index=False):
-            profile = drug_targets.get(row.drug_id, set())
+            profile = row.compatible_protein_profile
             max_similarity = max(
-                (jaccard(profile, selected_profile) for _, selected_profile in selected),
+                (mechanism_overlap(profile, selected_profile)
+                 for _, selected_profile in selected),
                 default=0.0,
             )
-            if len(selected) >= args.top_per_disease:
+            if not profile:
+                decision = "WITHHELD_NO_SUPPORTED_MECHANISM"
+            elif len(selected) >= args.top_per_disease:
                 decision = "WITHHELD_DISEASE_QUOTA"
             elif max_similarity >= args.similarity_threshold:
                 decision = "WITHHELD_MECHANISTICALLY_REDUNDANT"
@@ -160,7 +178,7 @@ def main() -> None:
         "policy": {
             "ranking_model": "Frozen Evidence-Aware R-GCN V2",
             "post_model_ranking": "specificity/pathway/class-aware novelty score",
-            "diversification": "At most three non-near-duplicate mechanisms per disease",
+            "diversification": "At most three non-near-duplicate evidence-supported protein mechanisms per disease",
             "promotion": "Only M1/M2 candidates with the prior evidence gate passed; source review remains required",
         },
     }
