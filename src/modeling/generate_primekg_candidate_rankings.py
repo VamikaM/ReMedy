@@ -46,9 +46,20 @@ def main() -> None:
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
-    drugs = nodes.loc[nodes["node_type"].eq("drug"), ["node_id", "node_name"]].copy()
+    # Rank only the drug/disease universe represented in the supervised evaluation
+    # splits. Other PrimeKG entity nodes remain useful message-passing context but
+    # are outside this model's calibrated treatment-ranking scope.
+    label_drug_ids = set(labels["drug_id"].astype(str))
+    label_disease_ids = set(labels["disease_id"].astype(str))
+    drugs = nodes.loc[
+        nodes["node_type"].eq("drug") & nodes["node_id"].astype(str).isin(label_drug_ids),
+        ["node_id", "node_name"],
+    ].copy()
     drugs["drug_index"] = drugs.index
-    diseases = nodes.loc[nodes["node_type"].eq("disease"), ["node_id", "node_name"]].copy()
+    diseases = nodes.loc[
+        nodes["node_type"].eq("disease") & nodes["node_id"].astype(str).isin(label_disease_ids),
+        ["node_id", "node_name"],
+    ].copy()
     diseases["disease_index"] = diseases.index
     known = set(zip(labels["drug_id"].astype(str), labels["disease_id"].astype(str)))
 
@@ -89,12 +100,12 @@ def main() -> None:
     ranking.to_csv(output, index=False)
     metadata = {
         "model_path": str(args.model_path),
-        "candidate_drugs": int(len(drugs)),
-        "candidate_diseases": int(len(diseases)),
+        "candidate_drugs_in_evaluation_scope": int(len(drugs)),
+        "candidate_diseases_in_evaluation_scope": int(len(diseases)),
         "known_explicit_pairs_excluded": int(len(known)),
         "top_k_per_disease": args.top_k_per_disease,
         "rows_written": int(len(ranking)),
-        "interpretation": "Scores rank unobserved PrimeKG treatment pairs for research review. The output is passed to ReMedy evidence evaluation before any shortlist status.",
+        "interpretation": "Scores rank unobserved PrimeKG treatment pairs within the held-out evaluation universe. The output is passed to ReMedy evidence evaluation before any shortlist status.",
     }
     (args.report_dir / "primekg_rgcn_candidate_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     print(json.dumps(metadata, indent=2))
