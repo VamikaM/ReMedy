@@ -21,6 +21,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--disease-name", required=True, help="Exact or distinctive disease name fragment.")
     parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument(
+        "--include-related-diseases", action="store_true",
+        help="Also retrieve separately labelled related disease-name matches.",
+    )
     parser.add_argument("--report-dir", type=Path, default=ROOT / "reports" / "model_v2")
     return parser.parse_args()
 
@@ -81,11 +85,14 @@ def pubmed(drug: str, disease: str) -> list[dict[str, str]]:
 def main() -> None:
     args = parse_args()
     cards = pd.read_csv(args.report_dir / "primekg_rgcn_researcher_cards.csv", dtype={"drug_id": str, "disease_id": str})
-    selected = cards.loc[
-        cards["mechanism_gate_status"].eq("MECHANISM_REVIEW_READY")
-        & cards["disease_name"].str.contains(args.disease_name, case=False, na=False)
-    ].sort_values(["research_priority_rank", "model_score"], ascending=[True, False]).head(args.top_k)
-    if selected.empty:
+    supported = cards.loc[cards["mechanism_gate_status"].eq("MECHANISM_REVIEW_READY")].copy()
+    matched = supported.loc[
+        supported["disease_name"].str.contains(args.disease_name, case=False, na=False)
+    ].copy()
+    query_normalized = args.disease_name.casefold().strip()
+    exact = matched.loc[matched["disease_name"].str.casefold().eq(query_normalized)].copy()
+    related = matched.loc[~matched.index.isin(exact.index)].copy()
+    if exact.empty and related.empty:
         suggestions = cards.loc[
             cards["disease_name"].str.contains(args.disease_name, case=False, na=False),
             "disease_name",
@@ -94,6 +101,28 @@ def main() -> None:
             "No mechanism-supported candidates matched this disease. "
             f"Related disease names in the ranking: {suggestions}"
         )
+    sort_columns = ["research_priority_rank", "model_score"]
+    selected_parts = []
+    if not exact.empty:
+        selected_parts.append(
+            exact.sort_values(sort_columns, ascending=[True, False]).head(args.top_k).assign(
+                disease_match_scope="EXACT_DISEASE"
+            )
+        )
+    else:
+        selected_parts.append(
+            related.sort_values(sort_columns, ascending=[True, False]).head(args.top_k).assign(
+                disease_match_scope="RELATED_DISEASE_ONLY_NO_EXACT_MATCH"
+            )
+        )
+        related = related.iloc[0:0]
+    if args.include_related_diseases and not related.empty:
+        selected_parts.append(
+            related.sort_values(sort_columns, ascending=[True, False]).head(args.top_k).assign(
+                disease_match_scope="RELATED_DISEASE_CONTEXT"
+            )
+        )
+    selected = pd.concat(selected_parts, ignore_index=True)
 
     rows = []
     for index, candidate in enumerate(selected.itertuples(index=False), start=1):
@@ -119,12 +148,20 @@ def main() -> None:
         else:
             stage = "MECHANISM_ONLY_HYPOTHESIS"
             next_action = "Retrieve independent preclinical disease-model, exposure, and safety evidence."
+        first_trial = trial_records[0] if trial_records else {}
+        first_article = pubmed_records[0] if pubmed_records else {}
         rows.append({
             **candidate._asdict(),
             "research_context_stage": stage,
             "clinical_trial_count_retrieved": len(trial_records),
+            "example_trial_id": first_trial.get("nct_id", ""),
+            "example_trial_title": first_trial.get("trial_title", ""),
+            "example_trial_url": first_trial.get("trial_url", ""),
             "clinical_trial_records": json.dumps(trial_records),
             "pubmed_record_count_retrieved": len(pubmed_records),
+            "example_pmid": first_article.get("pmid", ""),
+            "example_article_title": first_article.get("article_title", ""),
+            "example_article_url": first_article.get("pubmed_url", ""),
             "pubmed_records": json.dumps(pubmed_records),
             "retrieval_errors": " | ".join(errors),
             "context_next_action": next_action,
@@ -136,6 +173,7 @@ def main() -> None:
     output.to_csv(output_path, index=False)
     summary = {
         "disease_query": args.disease_name,
+        "disease_match_scope_counts": output["disease_match_scope"].value_counts().to_dict(),
         "mechanism_supported_candidates_retrieved": int(len(output)),
         "research_context_stage_counts": output["research_context_stage"].value_counts().to_dict(),
         "policy": "Trial registration and literature retrieval provide research context. Endpoint/outcome assessment remains source-cited review.",
