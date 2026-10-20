@@ -132,8 +132,18 @@ def read_matrix(path: Path) -> pd.DataFrame:
 
 
 def read_platform_annotation(path: Path) -> pd.DataFrame:
+    # GEO platform annotations begin with metadata lines, then an explicit table.
     with gzip.open(path, "rt", encoding="utf-8", errors="replace") as handle:
-        annotation = pd.read_csv(handle, sep="\t", comment="#", dtype=str, low_memory=False)
+        for raw_line in handle:
+            if raw_line.startswith("!platform_table_begin"):
+                break
+        else:
+            raise RuntimeError(f"Could not find !platform_table_begin in {path.name}.")
+        annotation = pd.read_csv(handle, sep="\t", dtype=str, low_memory=False)
+    first_column = annotation.columns[0]
+    annotation = annotation.loc[
+        ~annotation[first_column].astype(str).str.startswith("!platform_table_end")
+    ]
     annotation.columns = [clean(column) for column in annotation.columns]
     return annotation.fillna("")
 
