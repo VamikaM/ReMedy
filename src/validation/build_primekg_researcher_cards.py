@@ -15,6 +15,9 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 PROTEIN_TYPE = "gene/protein"
+# PrimeKG drug-protein provenance distinguishes therapeutic targets from carrier and
+# transporter context. Only the former can pass the automatic mechanism gate.
+THERAPEUTIC_DRUG_RELATIONS = {"target", "enzyme"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -87,30 +90,40 @@ def main() -> None:
     cards: list[dict[str, object]] = []
     for row in ranking.itertuples(index=False):
         drug_id, disease_id = str(row.drug_id), str(row.disease_id)
-        targets = drug_targets.get(drug_id, set())
+        all_targets = drug_targets.get(drug_id, set())
         disease_proteins = disease_targets.get(disease_id, set())
-        direct = targets & disease_proteins
+        therapeutic_targets = {
+            protein for protein in all_targets
+            if drug_relations.get((drug_id, protein), set()) & THERAPEUTIC_DRUG_RELATIONS
+        }
+        shared_all = all_targets & disease_proteins
+        direct = therapeutic_targets & disease_proteins
+        binding_context_only = shared_all - direct
         neighborhood: set[str] = set()
-        for protein in targets:
+        for protein in therapeutic_targets:
             neighborhood.update(protein_neighbors.get(protein, set()))
         bridge = (neighborhood & disease_proteins) - direct
 
         if direct:
             status = "MECHANISM_REVIEW_READY"
-            next_action = "Retrieve disease-specific literature, trial outcomes, exposure, and safety evidence for the direct target path."
-            priority = 2
+            next_action = "Retrieve disease-specific literature, trial outcomes, exposure, and safety evidence for the direct therapeutic target path."
+            priority = 3
         elif bridge:
             status = "NETWORK_CONTEXT_REVIEW_REQUIRED"
             next_action = "Verify whether the one-hop protein network bridge is disease-causal before external evidence retrieval."
+            priority = 2
+        elif binding_context_only:
+            status = "WITHHELD_NONTHERAPEUTIC_BINDING_CONTEXT"
+            next_action = "Withhold: overlap is limited to carrier/transporter binding context rather than a recorded therapeutic target action."
             priority = 1
         else:
             status = "WITHHELD_NO_DISEASE_TARGET_SUPPORT"
-            next_action = "Withhold from researcher shortlist; no direct or one-hop disease-target support was retrieved."
+            next_action = "Withhold from researcher shortlist; no direct therapeutic target or one-hop disease-target support was retrieved."
             priority = 0
 
         direct_drug_actions = set()
         direct_disease_links = set()
-        for protein in direct:
+        for protein in shared_all:
             direct_drug_actions.update(drug_relations.get((drug_id, protein), set()))
             direct_disease_links.update(disease_relations.get((disease_id, protein), set()))
 
@@ -122,10 +135,13 @@ def main() -> None:
             "drug_name": row.drug_name,
             "model_score": float(row.model_score),
             "known_pair_control": "EXCLUDED_FROM_OUTPUT_IF_EXPLICIT_INDICATION_OFF_LABEL_OR_CONTRAINDICATION",
-            "drug_target_count": len(targets),
+            "drug_target_count_all_relations": len(all_targets),
+            "drug_therapeutic_target_count": len(therapeutic_targets),
             "disease_target_count": len(disease_proteins),
             "direct_shared_target_count": len(direct),
             "direct_shared_targets": label_names(direct, protein_names),
+            "nontherapeutic_binding_overlap_count": len(binding_context_only),
+            "nontherapeutic_binding_overlap_targets": label_names(binding_context_only, protein_names),
             "direct_drug_relation_types": " | ".join(sorted(direct_drug_actions)),
             "direct_disease_relation_types": " | ".join(sorted(direct_disease_links)),
             "one_hop_network_bridge_count": len(bridge),
@@ -153,7 +169,8 @@ def main() -> None:
         "mechanism_gate_status_counts": result["mechanism_gate_status"].value_counts().to_dict(),
         "policy": {
             "known_treatment_or_contraindication": "excluded before ranking",
-            "direct_shared_target": "eligible for external evidence retrieval",
+            "direct_therapeutic_target": "eligible for external evidence retrieval",
+            "carrier_or_transporter_only_overlap": "withheld from researcher shortlist",
             "one_hop_network_context": "requires causal-mechanism review",
             "no_disease_target_support": "withheld from researcher shortlist",
         },
