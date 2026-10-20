@@ -1,13 +1,12 @@
 """Build a consensus Alzheimer brain-expression signature from public GEO cohorts.
 
-Cohorts:
-- GSE33000: postmortem prefrontal cortex, Alzheimer disease and non-demented samples.
-- GSE44770: postmortem prefrontal cortex, late-onset Alzheimer disease and controls.
+Cohort:
+- GSE118553: human postmortem Alzheimer and control brain samples.
 
-The script performs within-cohort differential expression and retains only
-directionally consistent signals across both cohorts as the strict consensus.
-It produces disease-expression evidence; drug action is not interpreted as a
-gene-expression reversal in this step.
+The script derives a frontal-cortex disease-expression signature from a GEO
+cohort whose sample-level disease labels are present in the downloaded matrix.
+It produces disease-expression context for evidence review; drug action is
+handled in later, separately validated stages.
 """
 from __future__ import annotations
 
@@ -26,18 +25,29 @@ from scipy.stats import ttest_ind
 
 
 COHORTS = {
-    "GSE33000": {
-        "matrix_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE33nnn/GSE33000/matrix/GSE33000_series_matrix.txt.gz",
-        "platform": "GPL4372",
-        "description": "Human postmortem prefrontal cortex expression cohort.",
-    },
-    "GSE44770": {
-        "matrix_url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE44nnn/GSE44770/matrix/GSE44770_series_matrix.txt.gz",
-        "platform": "GPL4372",
-        "description": "Human late-onset Alzheimer disease prefrontal cortex expression cohort.",
+    "GSE118553": {
+        "matrix_url": (
+            "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE118nnn/"
+            "GSE118553/matrix/GSE118553_series_matrix.txt.gz"
+        ),
+        "platform": "GPL10558",
+        "tissue_filter": "tissue: frontal_cortex",
+        "description": (
+            "Human postmortem frontal-cortex expression cohort with "
+            "Alzheimer disease and control sample labels."
+        ),
     },
 }
-PLATFORM_URL = "https://ftp.ncbi.nlm.nih.gov/geo/platforms/GPL4nnn/GPL4372/annot/GPL4372.annot.gz"
+
+
+def platform_annotation_url(platform: str) -> str:
+    # GEO groups platform files by the first platform-digit prefix, e.g.
+    # GPL10558 lives under GPL10nnn.
+    prefix = platform[:5] if len(platform) > 7 else platform[:4]
+    return (
+        f"https://ftp.ncbi.nlm.nih.gov/geo/platforms/{prefix}nnn/"
+        f"{platform}/annot/{platform}.annot.gz"
+    )
 
 
 def clean(value: object) -> str:
@@ -302,11 +312,18 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     args.cache_dir.mkdir(parents=True, exist_ok=True)
-    platform_path = args.cache_dir / "GPL4372.annot.gz"
-    request_download(PLATFORM_URL, platform_path)
+    output_dir = args.curated_dir / "expression"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    accession, config = next(iter(COHORTS.items()))
+    platform = clean(config["platform"])
+    platform_path = args.cache_dir / f"{platform}.annot.gz"
+    request_download(platform_annotation_url(platform), platform_path)
     annotation = read_platform_annotation(platform_path)
     annotation_probe_column = find_column(list(annotation.columns), ["ID", "ID_REF", "Probe ID"])
-    annotation_symbol_column = find_column(list(annotation.columns), ["Gene Symbol", "Gene symbol", "Symbol"])
+    annotation_symbol_column = find_column(
+        list(annotation.columns), ["Gene Symbol", "Gene symbol", "Symbol"]
+    )
     probe_to_gene = {
         clean(probe): gene_symbol(symbol)
         for probe, symbol in zip(annotation[annotation_probe_column], annotation[annotation_symbol_column])
@@ -315,69 +332,82 @@ def main() -> None:
     if not probe_to_gene:
         raise RuntimeError("Platform annotation did not yield any probe-to-gene mappings.")
 
-    results: list[pd.DataFrame] = []
-    sample_summary: list[dict] = []
-    output_dir = args.curated_dir / "expression"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for accession, config in COHORTS.items():
-        matrix_path = args.cache_dir / f"{accession}_series_matrix.txt.gz"
-        request_download(config["matrix_url"], matrix_path)
-        sample_ids, descriptions = read_series_metadata(matrix_path)
-        cases, controls = classify_samples(sample_ids, descriptions)
-        matrix = read_matrix(matrix_path)
-        result = differential_expression(accession, matrix, cases, controls, probe_to_gene)
-        result.to_csv(output_dir / f"{accession}_differential_expression.csv", index=False)
-        results.append(result)
-        sample_summary.append(
-            {
-                "cohort": accession,
-                "description": config["description"],
-                "classified_alzheimer_cases": len(cases),
-                "classified_controls": len(controls),
-                "mapped_genes_tested": int(len(result)),
-            }
-        )
-        print(
-            f"{accession}: analysed {len(cases)} Alzheimer and {len(controls)} control samples; "
-            f"{len(result)} mapped genes tested.",
-            flush=True,
-        )
+    matrix_path = args.cache_dir / f"{accession}_series_matrix.txt.gz"
+    request_download(clean(config["matrix_url"]), matrix_path)
+    sample_ids, descriptions = read_series_metadata(matrix_path)
+    cases, controls = classify_samples(sample_ids, descriptions)
 
-    consensus = consensus_signature(results)
-    consensus.to_csv(output_dir / "two_cohort_consensus_signature.csv", index=False)
+    sample_text = dict(zip(sample_ids, descriptions))
+    tissue_filter = clean(config["tissue_filter"]).lower()
+    cases = [sample for sample in cases if tissue_filter in sample_text[sample]]
+    controls = [sample for sample in controls if tissue_filter in sample_text[sample]]
+    matrix = read_matrix(matrix_path)
+    result = differential_expression(accession, matrix, cases, controls, probe_to_gene)
+    result.to_csv(output_dir / f"{accession}_frontal_cortex_differential_expression.csv", index=False)
+
+    signature = result[
+        [
+            "gene_symbol",
+            "cohort",
+            "mean_case_expression",
+            "mean_control_expression",
+            "log_expression_difference",
+            "t_statistic",
+            "p_value",
+            "fdr_bh",
+            "probe_count",
+            "n_cases",
+            "n_controls",
+            "expression_direction",
+        ]
+    ].copy()
+    signature["expression_evidence_category"] = np.where(
+        signature["fdr_bh"].le(0.05),
+        "FDR_SIGNIFICANT_FRONTAL_CORTEX_SIGNAL",
+        "FRONTAL_CORTEX_CONTEXT_ONLY",
+    )
+    signature = signature.rename(columns={"expression_direction": "consensus_direction"})
+    signature.to_csv(output_dir / "alzheimers_frontal_cortex_expression_signature.csv", index=False)
+
     targets_path = args.curated_dir / "target_panel" / "target_evidence_panel.csv"
     if targets_path.exists():
         targets = pd.read_csv(targets_path, dtype=str).fillna("")
         targets["target_symbol"] = targets["protein_label"].map(lambda value: clean(value).upper())
         target_expression = targets.merge(
-            consensus,
+            signature,
             left_on="target_symbol",
             right_on="gene_symbol",
             how="left",
         )
         target_expression["expression_evidence_category"] = target_expression[
             "expression_evidence_category"
-        ].fillna("NO_BULK_BRAIN_SIGNATURE_MATCH")
+        ].fillna("NO_FRONTAL_CORTEX_SIGNATURE_MATCH")
         target_expression.to_csv(output_dir / "target_expression_context.csv", index=False)
 
-    strict_count = int(
-        consensus["expression_evidence_category"].eq("STRICT_TWO_COHORT_CONSENSUS").sum()
+    significant_count = int(
+        signature["expression_evidence_category"].eq(
+            "FDR_SIGNIFICANT_FRONTAL_CORTEX_SIGNAL"
+        ).sum()
     )
     manifest = {
-        "cohorts": sample_summary,
-        "platform_annotation": "GPL4372",
+        "cohort": accession,
+        "cohort_description": config["description"],
+        "tissue_filter": config["tissue_filter"],
+        "classified_alzheimer_cases": len(cases),
+        "classified_controls": len(controls),
+        "platform_annotation": platform,
         "probe_to_gene_mappings": int(len(probe_to_gene)),
-        "shared_genes_across_cohorts": int(len(consensus)),
-        "strict_two_cohort_consensus_genes": strict_count,
+        "mapped_genes_tested": int(len(result)),
+        "fdr_significant_frontal_cortex_genes": significant_count,
         "policy": (
-            "The consensus signature records differential expression in postmortem brain cohorts. "
-            "It is disease-context evidence and does not by itself establish target causality "
-            "or a drug-response prediction."
+            "This file records disease-expression context in labelled postmortem "
+            "frontal-cortex samples. It is used to prioritize evidence review and "
+            "does not alone establish target causality or a therapeutic effect."
         ),
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(manifest, indent=2))
-    print(f"Wrote Alzheimer expression signature outputs to {output_dir}")
+    print(f"Wrote Alzheimer frontal-cortex expression outputs to {output_dir}")
 
 
 if __name__ == "__main__":
