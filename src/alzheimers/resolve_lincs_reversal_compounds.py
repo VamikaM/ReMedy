@@ -161,7 +161,8 @@ def main() -> None:
             print(f"Resolved {index}/{len(candidates)} LINCS perturbations against ChEMBL.", flush=True)
 
     resolved = pd.DataFrame(resolution_rows)
-    mechanisms = pd.DataFrame(mechanism_rows)
+    all_mechanisms = pd.DataFrame(mechanism_rows)
+    mechanisms = all_mechanisms.copy()
     if mechanisms.empty:
         panel_context = pd.DataFrame(
             columns=[
@@ -204,6 +205,7 @@ def main() -> None:
     output_dir = lincs_dir / "compound_resolution"
     output_dir.mkdir(parents=True, exist_ok=True)
     result.to_csv(output_dir / "lincs_reversal_chembl_resolved_candidates.csv", index=False)
+    all_mechanisms.to_csv(output_dir / "lincs_reversal_all_chembl_mechanisms.csv", index=False)
     mechanisms.to_csv(output_dir / "lincs_reversal_chembl_mechanisms.csv", index=False)
     print(
         json.dumps(
