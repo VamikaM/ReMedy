@@ -109,7 +109,10 @@ def main() -> None:
     if raw.empty:
         raise RuntimeError("L1000CDS2 returned no perturbation signatures.")
     raw.insert(0, "l1000_reverse_rank", range(1, len(raw) + 1))
-    raw["pert_desc"] = raw.get("pert_desc", pd.Series("", index=raw.index)).map(clean)
+    for column in ["pert_desc", "sig_id", "cell_id", "pert_dose", "pert_time", "score"]:
+        if column not in raw.columns:
+            raw[column] = ""
+    raw["pert_desc"] = raw["pert_desc"].map(clean)
     raw["normalized_drug_name"] = raw["pert_desc"].map(normalized_name)
     raw["l1000_source"] = "LINCS L1000CDS2"
     raw["l1000_query_mode"] = "reverse"
