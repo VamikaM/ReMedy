@@ -2,8 +2,9 @@
 
 The builder streams PrimeKG in chunks, uses only explicit indication/off-label
 relations as positive labels and explicit contraindications as negatives, removes
-all drug-disease label edges from message passing, and splits by held-out drug.
-This prevents a model from seeing the answer edge during graph propagation.
+all drug-disease label edges from message passing, and holds out every treatment
+label for validation/test drugs. Biological side-information stays available for
+each drug, matching the information available when ranking a new indication.
 """
 from __future__ import annotations
 
@@ -121,12 +122,12 @@ def main() -> None:
         balanced.append(pd.concat([pos, neg], ignore_index=True))
     labels = pd.concat(balanced, ignore_index=True).sample(frac=1, random_state=args.seed).reset_index(drop=True)
 
-    train_drugs = set(labels.loc[labels["split"].eq("train"), "drug_id"])
     all_label_drugs = set(labels["drug_id"])
     all_label_diseases = set(labels["disease_id"])
 
-    # Second streaming pass: keep only biological/contextual edges incident to labelled
-    # drugs or diseases. All drug-disease edges are excluded to remove label leakage.
+    # Second streaming pass: retain biological/contextual side-information for every
+    # labelled drug/disease. All drug-disease edges are excluded, so no treatment
+    # answer is available to message passing.
     graph_rows: list[dict] = []
     for chunk_index, chunk in enumerate(
         pd.read_csv(args.primekg, chunksize=args.chunk_size, low_memory=False), start=1
@@ -136,14 +137,8 @@ def main() -> None:
             if {x_type, y_type} == {"drug", "disease"}:
                 continue
             x_id, y_id = clean(row.x_id), clean(row.y_id)
-            # For held-out drugs, do not retain any incident edge; this is a strict
-            # drug-cold evaluation rather than an easier transductive test.
-            if x_type == "drug" and x_id not in train_drugs:
-                continue
-            if y_type == "drug" and y_id not in train_drugs:
-                continue
             incident_to_scope = (
-                x_id in train_drugs or y_id in train_drugs
+                x_id in all_label_drugs or y_id in all_label_drugs
                 or x_id in all_label_diseases or y_id in all_label_diseases
             )
             if not incident_to_scope or not x_id or not y_id:
@@ -197,14 +192,15 @@ def main() -> None:
         "explicit_indication_or_off_label_positive_pairs": int((labels["label"] == 1).sum()),
         "explicit_contraindication_negative_pairs": int((labels["label"] == 0).sum()),
         "conflicting_pairs_excluded": len(conflicts),
-        "unique_drugs_in_drug_cold_splits": int(labels["drug_id"].nunique()),
+        "unique_drugs_with_held_out_treatment_labels": int(labels["drug_id"].nunique()),
         "unique_diseases": int(labels["disease_id"].nunique()),
         "nodes": int(len(nodes)),
         "message_passing_edges_without_drug_disease_labels": int(len(edges)),
         "split_counts": labels.groupby("split").size().to_dict(),
         "policy": (
             "No drug-disease indication, off-label, or contraindication edge is included "
-            "in message passing. Test-drug incident biological edges are also withheld."
+            "in message passing. Every validation/test treatment label is withheld, while "
+            "drug-target and other biological side-information remains available."
         ),
     }
     (args.output_dir / "manifest.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
