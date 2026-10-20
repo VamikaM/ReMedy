@@ -30,6 +30,11 @@ def ordered_join(values: pd.Series, limit: int | None = None) -> str:
     return " | ".join(out)
 
 
+def platform_identifier(value: object) -> str:
+    """Normalise Open Targets route identifiers, e.g. MONDO:0004975 -> MONDO_0004975."""
+    return clean(value).replace(":", "_")
+
+
 def parse_args() -> argparse.Namespace:
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -121,10 +126,24 @@ def main() -> None:
     packets["open_targets_disease_id"] = packets["disease_id"].map(disease_map).fillna("")
     packets["open_targets_target_id"] = packets["protein_id"].map(protein_map).fillna("")
     packets["open_targets_disease_url"] = packets["open_targets_disease_id"].map(
-        lambda value: f"https://platform.opentargets.org/disease/{value}" if value else ""
+        lambda value: (
+            f"https://platform.opentargets.org/disease/{platform_identifier(value)}"
+            if clean(value) else ""
+        )
     )
     packets["open_targets_target_url"] = packets["open_targets_target_id"].map(
-        lambda value: f"https://platform.opentargets.org/target/{value}" if value else ""
+        lambda value: (
+            f"https://platform.opentargets.org/target/{platform_identifier(value)}"
+            if clean(value) else ""
+        )
+    )
+    # Preserve the raw label for compatibility, but add an unambiguous label
+    # that makes clear this is genetics evidence, not pharmacological efficacy.
+    packets["genetic_association_signal"] = packets["genetic_risk_directions"]
+    packets["interpretation_warning"] = (
+        "A loss/gain-of-function genetic association is not evidence that the "
+        "opposite drug action will treat the disease. Review causal role, tissue, "
+        "cell type, developmental timing and pharmacological evidence."
     )
     packets["automated_conclusion"] = "NONE"
     packets["review_question"] = (
