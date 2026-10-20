@@ -79,10 +79,12 @@ def read_series_metadata(path: Path) -> tuple[list[str], list[str]]:
     """
     sample_ids: list[str] = []
     phenotype_rows: list[list[str]] = []
-    phenotype_fields = {
-        "!Sample_title",
-        "!Sample_source_name_ch1",
-        "!Sample_description",
+    ignored_fields = {
+        "!Sample_geo_accession",
+        "!Sample_relation",
+        "!Sample_supplementary_file_1",
+        "!Sample_supplementary_file_2",
+        "!Sample_supplementary_file_3",
     }
     with gzip.open(path, "rt", encoding="utf-8", errors="replace") as handle:
         for raw_line in handle:
@@ -96,7 +98,10 @@ def read_series_metadata(path: Path) -> tuple[list[str], list[str]]:
             field = values[0]
             if field == "!Sample_geo_accession":
                 sample_ids = values[1:]
-            elif field in phenotype_fields or field.startswith("!Sample_characteristics_ch1"):
+            elif field not in ignored_fields:
+                # Studies are inconsistent about where diagnosis is recorded.
+                # Retain every per-sample annotation, then classify only explicit
+                # Alzheimer/control labels and leave all other samples unlabelled.
                 phenotype_rows.append(values[1:])
     if not sample_ids:
         raise RuntimeError(f"No sample accessions found in {path.name}.")
