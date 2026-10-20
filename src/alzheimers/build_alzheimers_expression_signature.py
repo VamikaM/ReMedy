@@ -70,8 +70,20 @@ def split_tsv(line: str) -> list[str]:
 
 
 def read_series_metadata(path: Path) -> tuple[list[str], list[str]]:
+    """Collect all study-design fields that can legitimately carry phenotype labels.
+
+    GEO studies vary: some put diagnosis in characteristics, while GSE33000
+    stores its case/control label in title/source-name fields.  Reference and
+    technical samples remain unclassified rather than being forced into a
+    disease group.
+    """
     sample_ids: list[str] = []
-    characteristic_rows: list[list[str]] = []
+    phenotype_rows: list[list[str]] = []
+    phenotype_fields = {
+        "!Sample_title",
+        "!Sample_source_name_ch1",
+        "!Sample_description",
+    }
     with gzip.open(path, "rt", encoding="utf-8", errors="replace") as handle:
         for raw_line in handle:
             if raw_line.startswith("!series_matrix_table_begin"):
@@ -81,15 +93,16 @@ def read_series_metadata(path: Path) -> tuple[list[str], list[str]]:
             values = [clean(value) for value in split_tsv(raw_line)]
             if not values:
                 continue
-            if values[0] == "!Sample_geo_accession":
+            field = values[0]
+            if field == "!Sample_geo_accession":
                 sample_ids = values[1:]
-            elif values[0].startswith("!Sample_characteristics_ch1"):
-                characteristic_rows.append(values[1:])
+            elif field in phenotype_fields or field.startswith("!Sample_characteristics_ch1"):
+                phenotype_rows.append(values[1:])
     if not sample_ids:
         raise RuntimeError(f"No sample accessions found in {path.name}.")
     descriptions = [
         " | ".join(
-            row[index] for row in characteristic_rows if index < len(row) and row[index]
+            row[index] for row in phenotype_rows if index < len(row) and row[index]
         ).lower()
         for index in range(len(sample_ids))
     ]
