@@ -193,7 +193,12 @@ def main() -> None:
         print(f"Retrieved Open Targets evidence batch {group_index}.", flush=True)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    raw = pd.DataFrame(raw_rows).drop_duplicates(
+    raw_columns = [
+        "disease_id", "disease_name", "open_targets_disease_id", "protein_id",
+        "open_targets_target_id", "target_symbol", "target_name", "datasource_id",
+        "evidence_score", "direction_on_target", "direction_on_trait", "evidence_id",
+    ]
+    raw = pd.DataFrame(raw_rows, columns=raw_columns).drop_duplicates(
         ["protein_id", "evidence_id"]
     )
     raw.to_csv(args.output_dir / "raw_target_evidence.csv", index=False)
