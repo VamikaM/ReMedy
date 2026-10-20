@@ -60,7 +60,8 @@ def main() -> None:
     args = parse_args()
     targets = pd.read_csv(args.target_review, dtype=str).fillna("")
     effects = pd.read_csv(args.effects, dtype=str).fillna("")
-    mapping = pd.read_csv(args.mapping_audit, dtype=str).fillna("")
+    mapping = (pd.read_csv(args.mapping_audit, dtype=str).fillna("")
+               if args.mapping_audit.exists() else pd.DataFrame())
 
     needed = {"disease_id", "disease_name", "protein_id"}
     if missing := needed - set(targets.columns):
@@ -73,18 +74,37 @@ def main() -> None:
             if column in frame.columns:
                 frame[column] = frame[column].map(clean)
 
-    protein_map = (
-        mapping.loc[mapping["entity_type"].eq("protein"), ["remedy_id", "open_targets_id"]]
-        .drop_duplicates("remedy_id")
-        .set_index("remedy_id")["open_targets_id"]
-        .to_dict()
-    )
-    disease_map = (
-        mapping.loc[mapping["entity_type"].eq("disease"), ["remedy_id", "open_targets_id"]]
-        .drop_duplicates("remedy_id")
-        .set_index("remedy_id")["open_targets_id"]
-        .to_dict()
-    )
+    # Prefer the explicit mapping audit when present. Recovered Kaggle artifacts
+    # may omit that report, in which case the same IDs are available directly in
+    # disease_target_effects.csv and can safely reconstruct the review links.
+    if not mapping.empty and {"entity_type", "remedy_id", "open_targets_id"} <= set(mapping.columns):
+        protein_map = (
+            mapping.loc[mapping["entity_type"].eq("protein"), ["remedy_id", "open_targets_id"]]
+            .drop_duplicates("remedy_id")
+            .set_index("remedy_id")["open_targets_id"]
+            .to_dict()
+        )
+        disease_map = (
+            mapping.loc[mapping["entity_type"].eq("disease"), ["remedy_id", "open_targets_id"]]
+            .drop_duplicates("remedy_id")
+            .set_index("remedy_id")["open_targets_id"]
+            .to_dict()
+        )
+    else:
+        disease_map = (
+            effects.loc[effects.get("open_targets_disease_id", "").map(clean).ne(""),
+                        ["disease_id", "open_targets_disease_id"]]
+            .drop_duplicates("disease_id")
+            .set_index("disease_id")["open_targets_disease_id"]
+            .to_dict()
+        ) if "open_targets_disease_id" in effects.columns else {}
+        protein_map = (
+            effects.loc[effects.get("open_targets_target_id", "").map(clean).ne(""),
+                        ["protein_id", "open_targets_target_id"]]
+            .drop_duplicates("protein_id")
+            .set_index("protein_id")["open_targets_target_id"]
+            .to_dict()
+        ) if "open_targets_target_id" in effects.columns else {}
 
     summary = (
         effects.groupby(["disease_id", "protein_id"], as_index=False)
