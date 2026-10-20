@@ -92,6 +92,20 @@ def disposition(
             "A source-backed indication match was retrieved; retain only as a known-use control.",
             "Use this pair for sanity checking, not as a novel repurposing result.",
         )
+    if known_use == "KNOWN_USE_TERM_MATCH_REVIEW":
+        return (
+            "POSSIBLE_KNOWN_USE_ONTOLOGY_REVIEW_REQUIRED",
+            "WITHHOLD_PENDING_ONTOLOGY_REVIEW",
+            "A disease-term indication match was retrieved, but the ontology identity is not exact.",
+            "Resolve the source disease term and identifier before claiming novelty or use.",
+        )
+    if known_use == "CHEMBL_RETRIEVAL_ERROR":
+        return (
+            "KNOWN_USE_SCREEN_RETRIEVAL_ERROR",
+            "WITHHOLD_PENDING_SOURCE_RETRIEVAL",
+            "The known-use source could not be retrieved; absence of a match cannot be interpreted.",
+            "Retry the ChEMBL indication retrieval before considering novelty.",
+        )
 
     # These two findings are only decisive when the review has a citation.
     if has_outcome_citation and safety_verdict == "EXCLUDE":
