@@ -207,7 +207,14 @@ def main() -> None:
             )
         )
 
+    # The workspace stores an initial placeholder stage; keep the evaluator's
+    # post-review stage under an unambiguous name.
     chain_cols = ["candidate_id", "evidence_chain_stage", "target_gate_status", "exposure_gate_status"]
+    reviewed_chain = chain[chain_cols].rename(columns={
+        "evidence_chain_stage": "reviewed_evidence_chain_stage",
+        "target_gate_status": "reviewed_target_gate_status",
+        "exposure_gate_status": "reviewed_exposure_gate_status",
+    })
     known_cols = ["candidate_id", "known_use_screen_status", "source_url"]
     outcome_cols = [
         "candidate_id",
@@ -217,7 +224,7 @@ def main() -> None:
         "source_citation",
         "review_notes",
     ]
-    result = candidates.merge(chain[chain_cols], on="candidate_id", how="left")
+    result = candidates.merge(reviewed_chain, on="candidate_id", how="left")
     result = result.merge(known[known_cols], on="candidate_id", how="left", suffixes=("", "_known_use"))
     result = result.merge(outcomes[outcome_cols], on="candidate_id", how="left")
     result = result.fillna("")
@@ -243,7 +250,7 @@ def main() -> None:
         final, eligibility, basis, action = disposition(
             clean(row.known_use_screen_status),
             clean(row.safety_status),
-            clean(row.evidence_chain_stage),
+            clean(row.reviewed_evidence_chain_stage),
             human,
             safety,
             cited,
@@ -260,8 +267,8 @@ def main() -> None:
             "next_action": action,
             "known_use_screen": clean(row.known_use_screen_status),
             "mechanism_context_screen": "MECHANISM_AND_CONTEXT_SCREEN_PASSED",
-            "target_gate_status": clean(row.target_gate_status),
-            "exposure_gate_status": clean(row.exposure_gate_status),
+            "target_gate_status": clean(row.reviewed_target_gate_status),
+            "exposure_gate_status": clean(row.reviewed_exposure_gate_status),
             "preclinical_phenotype_verdict": clean(row.preclinical_phenotype_verdict) or "PENDING",
             "human_outcome_verdict": human or "PENDING",
             "disease_relevant_safety_verdict": safety or "PENDING",
