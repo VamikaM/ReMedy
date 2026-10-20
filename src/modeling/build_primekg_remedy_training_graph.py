@@ -154,26 +154,30 @@ def main() -> None:
     edges = pd.DataFrame(graph_rows).drop_duplicates(["source_id", "relation", "target_id"])
     if edges.empty:
         raise RuntimeError("No biological graph edges were retained; inspect PrimeKG relation schema.")
+    # PrimeKG reuses numeric identifiers across entity namespaces. Internal node keys
+    # therefore include the entity type (for example gene/protein::9796).
+    edges["source_key"] = edges["source_type"] + "::" + edges["source_id"]
+    edges["target_key"] = edges["target_type"] + "::" + edges["target_id"]
     nodes = pd.concat([
-        edges[["source_id", "source_type", "source_name", "source_database"]].rename(
-            columns={"source_id": "node_id", "source_type": "node_type", "source_name": "node_name", "source_database": "source_database"}
+        edges[["source_key", "source_id", "source_type", "source_name", "source_database"]].rename(
+            columns={"source_key": "node_key", "source_id": "node_id", "source_type": "node_type", "source_name": "node_name"}
         ),
-        edges[["target_id", "target_type", "target_name", "target_database"]].rename(
-            columns={"target_id": "node_id", "target_type": "node_type", "target_name": "node_name", "target_database": "source_database"}
+        edges[["target_key", "target_id", "target_type", "target_name", "target_database"]].rename(
+            columns={"target_key": "node_key", "target_id": "node_id", "target_type": "node_type", "target_name": "node_name", "target_database": "source_database"}
         ),
-    ], ignore_index=True).drop_duplicates("node_id")
+    ], ignore_index=True).drop_duplicates("node_key")
 
     # Ensure every pair endpoint exists even when it has no biological edge.
     pair_nodes = pd.concat([
-        labels[["drug_id", "drug_name"]].rename(columns={"drug_id": "node_id", "drug_name": "node_name"}).assign(node_type="drug", source_database="PrimeKG"),
-        labels[["disease_id", "disease_name"]].rename(columns={"disease_id": "node_id", "disease_name": "node_name"}).assign(node_type="disease", source_database="PrimeKG"),
-    ], ignore_index=True).drop_duplicates("node_id")
-    nodes = pd.concat([nodes, pair_nodes], ignore_index=True).drop_duplicates("node_id", keep="first")
-    node_map = {node_id: index for index, node_id in enumerate(nodes["node_id"])}
-    edges["source_index"] = edges["source_id"].map(node_map)
-    edges["target_index"] = edges["target_id"].map(node_map)
-    labels["drug_index"] = labels["drug_id"].map(node_map)
-    labels["disease_index"] = labels["disease_id"].map(node_map)
+        labels[["drug_id", "drug_name"]].rename(columns={"drug_id": "node_id", "drug_name": "node_name"}).assign(node_key=lambda frame: "drug::" + frame["node_id"], node_type="drug", source_database="PrimeKG"),
+        labels[["disease_id", "disease_name"]].rename(columns={"disease_id": "node_id", "disease_name": "node_name"}).assign(node_key=lambda frame: "disease::" + frame["node_id"], node_type="disease", source_database="PrimeKG"),
+    ], ignore_index=True).drop_duplicates("node_key")
+    nodes = pd.concat([nodes, pair_nodes], ignore_index=True).drop_duplicates("node_key", keep="first")
+    node_map = {node_key: index for index, node_key in enumerate(nodes["node_key"])}
+    edges["source_index"] = edges["source_key"].map(node_map)
+    edges["target_index"] = edges["target_key"].map(node_map)
+    labels["drug_index"] = ("drug::" + labels["drug_id"]).map(node_map)
+    labels["disease_index"] = ("disease::" + labels["disease_id"]).map(node_map)
 
     labels.to_csv(args.output_dir / "drug_disease_labels_drug_cold.csv", index=False)
     for split in ["train", "validation", "test"]:
@@ -194,7 +198,7 @@ def main() -> None:
         "conflicting_pairs_excluded": len(conflicts),
         "unique_drugs_with_held_out_treatment_labels": int(labels["drug_id"].nunique()),
         "unique_diseases": int(labels["disease_id"].nunique()),
-        "nodes": int(len(nodes)),
+        "nodes_with_type_qualified_identity": int(len(nodes)),
         "message_passing_edges_without_drug_disease_labels": int(len(edges)),
         "split_counts": labels.groupby("split").size().to_dict(),
         "policy": (
