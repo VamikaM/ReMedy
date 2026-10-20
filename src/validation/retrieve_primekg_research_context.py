@@ -1,7 +1,7 @@
 """Retrieve trial and literature context for mechanism-supported PrimeKG candidates.
 
-Run for one selected disease at a time. Retrieved records establish research context;
-they are not automatically interpreted as evidence of efficacy or safety.
+Run for one selected disease at a time. Retrieved records are unscreened search
+context; source-cited outcome review is required before efficacy or safety claims.
 """
 from __future__ import annotations
 
@@ -139,11 +139,14 @@ def main() -> None:
             errors.append(f"PubMed retrieval failed: {type(error).__name__}")
         time.sleep(0.35)
 
-        if trial_records:
-            stage = "HUMAN_RESEARCH_CONTEXT_RETRIEVED"
+        if trial_records and pubmed_records:
+            stage = "TRIAL_AND_PUBMED_CONTEXT_UNSCREENED"
+            next_action = "Screen trial endpoints and articles for direct disease efficacy, harm, population relevance, and target relevance."
+        elif trial_records:
+            stage = "TRIAL_REGISTRY_CONTEXT_UNSCREENED"
             next_action = "Review linked trial endpoints and source-cite efficacy, harm, and population relevance."
         elif pubmed_records:
-            stage = "LITERATURE_CONTEXT_RETRIEVED"
+            stage = "PUBMED_SEARCH_HITS_UNSCREENED"
             next_action = "Screen retrieved papers for direct disease efficacy, model system, and target relevance."
         else:
             stage = "MECHANISM_ONLY_HYPOTHESIS"
@@ -154,14 +157,14 @@ def main() -> None:
             **candidate._asdict(),
             "research_context_stage": stage,
             "clinical_trial_count_retrieved": len(trial_records),
-            "example_trial_id": first_trial.get("nct_id", ""),
-            "example_trial_title": first_trial.get("trial_title", ""),
-            "example_trial_url": first_trial.get("trial_url", ""),
+            "first_retrieved_trial_id": first_trial.get("nct_id", ""),
+            "first_retrieved_trial_title": first_trial.get("trial_title", ""),
+            "first_retrieved_trial_url": first_trial.get("trial_url", ""),
             "clinical_trial_records": json.dumps(trial_records),
             "pubmed_record_count_retrieved": len(pubmed_records),
-            "example_pmid": first_article.get("pmid", ""),
-            "example_article_title": first_article.get("article_title", ""),
-            "example_article_url": first_article.get("pubmed_url", ""),
+            "first_retrieved_pmid": first_article.get("pmid", ""),
+            "first_retrieved_article_title": first_article.get("article_title", ""),
+            "first_retrieved_article_url": first_article.get("pubmed_url", ""),
             "pubmed_records": json.dumps(pubmed_records),
             "retrieval_errors": " | ".join(errors),
             "context_next_action": next_action,
@@ -176,7 +179,7 @@ def main() -> None:
         "disease_match_scope_counts": output["disease_match_scope"].value_counts().to_dict(),
         "mechanism_supported_candidates_retrieved": int(len(output)),
         "research_context_stage_counts": output["research_context_stage"].value_counts().to_dict(),
-        "policy": "Trial registration and literature retrieval provide research context. Endpoint/outcome assessment remains source-cited review.",
+        "policy": "Trial and PubMed retrieval are unscreened search context. Source-cited article/trial outcome review is required before any efficacy or safety claim.",
     }
     (args.report_dir / f"primekg_research_context_{safe_name}_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2))
