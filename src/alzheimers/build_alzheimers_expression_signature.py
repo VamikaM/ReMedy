@@ -100,7 +100,10 @@ def classify_samples(sample_ids: list[str], descriptions: list[str]) -> tuple[li
     cases: list[str] = []
     controls: list[str] = []
     for sample_id, description in zip(sample_ids, descriptions):
-        is_ad = "alzheimer" in description
+        is_ad = (
+            "alzheimer" in description
+            or bool(re.search(r"\\blate onset ad\\b|\\bload\\b|\\bad\\b", description))
+        )
         is_hd = "huntington" in description
         is_control = (
             "non-demented" in description
