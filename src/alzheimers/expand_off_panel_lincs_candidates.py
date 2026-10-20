@@ -198,8 +198,17 @@ def main() -> None:
             ot_datasource_count=("datasource", lambda x: len({clean(v) for v in x if clean(v)})),
             ot_datasources=("datasource", lambda x: " | ".join(sorted({clean(v) for v in x if clean(v)}))),
         )
-    chembl_targets["ensembl_id"] = chembl_targets["uniprot_accession"].map(accession_to_ensembl)
-    target_context = chembl_targets.merge(summary, on="ensembl_id", how="left").fillna("")
+    if chembl_targets.empty:
+        target_context = pd.DataFrame(
+            columns=[
+                "chembl_target_id", "uniprot_accession", "chembl_target_name",
+                "ensembl_id", "target_symbol", "ot_evidence_count",
+                "ot_datasource_count", "ot_datasources",
+            ]
+        )
+    else:
+        chembl_targets["ensembl_id"] = chembl_targets["uniprot_accession"].map(accession_to_ensembl)
+        target_context = chembl_targets.merge(summary, on="ensembl_id", how="left").fillna("")
     expanded = (
         mechanisms.merge(target_context, on="chembl_target_id", how="left")
         .groupby("chembl_molecule_id", as_index=False)
